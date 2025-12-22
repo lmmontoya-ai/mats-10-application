@@ -1,0 +1,114 @@
+# Dataset Generation Configuration
+# =================================
+# This configuration controls the generation of the needle-in-a-haystack
+# dataset for prompt injection monitoring research.
+#
+# All parameters here, combined with the random seeds, fully determine
+# the generated dataset. Running with the same config produces identical
+# outputs (byte-for-byte reproducibility).
+
+# Tokenizer settings
+tokenizer:
+  # Model ID for HuggingFace tokenizer
+  # This determines how token lengths are computed
+  model_id: "google/gemma-3-4b-it"
+
+  # Optional tokenizer override (defaults to model_id if null)
+  tokenizer_id: null
+
+  # Optional tokenizer revision/commit hash for reproducibility
+  tokenizer_revision: null
+
+  # Maximum length bucket (informational)
+  max_length_bucket: 16384
+
+  # Tolerance ratio for length matching
+  # Examples are accepted if within ±(tolerance_ratio * target_bucket) tokens
+  token_tolerance_ratio: 0.02
+
+# Dataset scale settings
+scale:
+  # Number of examples per condition per split
+  # Total examples = n_split * |length_buckets| * |distractor_levels|
+  # Reduce for smoke tests if needed.
+  n_train: 600
+  n_val: 200
+  n_test: 200
+
+  # Fraction of positive (needle present) examples
+  positive_fraction: 0.5
+
+# Experimental grid
+# Dataset will contain all combinations of these conditions
+grid:
+  # Token length buckets to generate
+  # Recommended full-run buckets; reduce for quick smoke tests
+  length_buckets_tokens:
+    - 2048
+    - 8192
+    - 16384
+
+  # Number of distractor spans per document
+  # 0 = no distractors, higher = more false positive pressure
+  distractor_levels:
+    - 0
+    - 1
+    - 4
+    - 8
+
+# Random seeds for reproducibility
+randomness:
+  # Master seed - all other randomness derived from this
+  dataset_seed: 42
+
+  # Sub-seeds (derived from dataset_seed if null)
+  template_seed: null
+  filler_seed: null
+
+# Template configuration
+# Leave empty to use built-in default templates
+templates:
+  # Optional path to external templates YAML file
+  templates_path: null
+
+  # Inline template definitions (if not using defaults or external file)
+  needle_families: []
+  distractor_families: []
+
+# Train/val/test split configuration
+splits:
+  # Explicit family assignment for test (for reproducibility)
+  # Leave empty for hash-based automatic assignment
+  test_needle_families:
+    - "jailbreak_direct"
+    - "context_confusion"
+
+  val_needle_families:
+    - "authority_claim"
+
+  # Fraction-based fallback (used if explicit lists are empty)
+  test_fraction: 0.2
+  val_fraction: 0.1
+
+  # Whether to also holdout distractor families for test
+  # Usually false - distractors can overlap to test generalization
+  holdout_distractor_families: false
+
+# Output configuration
+output:
+  dataset_name: "needle_haystack"
+  dataset_version: "v1.0"
+  output_root: "data"
+
+# Filler text configuration
+filler:
+  # Path to filler segments JSONL file
+  filler_path: "data_raw/filler_segments.jsonl"
+
+  # Whether to allow synthetic fallback if filler file missing
+  # Set to true only for testing; false for production
+  allow_llm_fallback: false
+
+  # Segment length constraints (in estimated tokens)
+  min_segment_tokens: 50
+  max_segment_tokens: 500

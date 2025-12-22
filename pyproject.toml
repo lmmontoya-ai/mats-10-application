@@ -1,7 +1,12 @@
 [project]
 name = "mats-10-application"
 version = "0.1.0"
-description = "Add your description here"
+description = "Mechanistic interpretability research for prompt injection monitoring"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "transformers>=4.36.0",
+    "torch>=2.0.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.65.0",
+]
