@@ -175,6 +175,88 @@ class ProbeConfig:
 
 
 @dataclass
+class EvalConfig:
+    """Configuration for evaluation and plotting."""
+
+    aggregators: list[str] = field(
+        default_factory=lambda: [
+            "max",
+            "noisy_or",
+            "logsumexp",
+            "ema_max",
+            "windowed_max_mean",
+        ]
+    )
+    logsumexp_temperature: float = 1.0
+    logsumexp_length_correction: bool = True
+    topk_k: int | None = None
+    ema_alpha: float = 0.1
+    window_size: int = 128
+    target_tprs: list[float] = field(default_factory=lambda: [0.95])
+    eval_doc_batch_size: int = 1
+    max_eval_docs: int | None = None
+    calibrator: str = "platt"  # platt | none
+    results_dir: str = "results"
+    save_scores: bool = False
+    error_analysis: bool = True
+    error_samples: int = 20
+    error_length_bucket: int | None = None
+    plot_length_bucket: int | None = None
+    plot_distractor_level: int | None = None
+    plot_layer_aggregator: str | None = None
+    plot_layer_metric: str = "fpr_at_tpr_0.95"
+
+    def __post_init__(self) -> None:
+        def _coerce_int(value: Any, name: str) -> int | None:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be an integer, not bool")
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                return int(value)
+            return int(str(value))
+
+        def _coerce_float(value: Any, name: str) -> float:
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be a float, not bool")
+            if isinstance(value, (int, float)):
+                return float(value)
+            return float(str(value))
+
+        if self.aggregators is not None:
+            self.aggregators = [str(a) for a in self.aggregators]
+        self.logsumexp_temperature = _coerce_float(
+            self.logsumexp_temperature, "eval.logsumexp_temperature"
+        )
+        self.topk_k = _coerce_int(self.topk_k, "eval.topk_k")
+        self.ema_alpha = _coerce_float(self.ema_alpha, "eval.ema_alpha")
+        self.window_size = _coerce_int(self.window_size, "eval.window_size") or 1
+        if self.target_tprs is not None:
+            self.target_tprs = [
+                _coerce_float(v, "eval.target_tprs") for v in self.target_tprs
+            ]
+        self.eval_doc_batch_size = (
+            _coerce_int(self.eval_doc_batch_size, "eval.eval_doc_batch_size") or 1
+        )
+        self.max_eval_docs = _coerce_int(self.max_eval_docs, "eval.max_eval_docs")
+        self.error_samples = _coerce_int(self.error_samples, "eval.error_samples") or 0
+        self.error_length_bucket = _coerce_int(
+            self.error_length_bucket, "eval.error_length_bucket"
+        )
+        self.plot_length_bucket = _coerce_int(
+            self.plot_length_bucket, "eval.plot_length_bucket"
+        )
+        self.plot_distractor_level = _coerce_int(
+            self.plot_distractor_level, "eval.plot_distractor_level"
+        )
+        if self.plot_layer_aggregator is not None:
+            self.plot_layer_aggregator = str(self.plot_layer_aggregator)
+        self.plot_layer_metric = str(self.plot_layer_metric)
+
+
+@dataclass
 class DatasetConfig:
     """
     Complete configuration for dataset generation.
@@ -191,6 +273,7 @@ class DatasetConfig:
     output: OutputConfig
     filler: FillerConfig
     probe: ProbeConfig = field(default_factory=ProbeConfig)
+    eval: EvalConfig = field(default_factory=EvalConfig)
 
     def __post_init__(self) -> None:
         """Derive dependent seeds if not specified."""
@@ -254,6 +337,18 @@ class DatasetConfig:
             errors.append("output.dataset_name must be specified")
         if not self.output.dataset_version:
             errors.append("output.dataset_version must be specified")
+
+        # Validate eval config
+        if not self.eval.aggregators:
+            errors.append("eval.aggregators must not be empty")
+        if any(t <= 0 or t >= 1 for t in self.eval.target_tprs):
+            errors.append("eval.target_tprs must be in (0, 1)")
+        if self.eval.ema_alpha <= 0 or self.eval.ema_alpha > 1:
+            errors.append("eval.ema_alpha must be in (0, 1]")
+        if self.eval.window_size <= 0:
+            errors.append("eval.window_size must be positive")
+        if self.eval.logsumexp_temperature <= 0:
+            errors.append("eval.logsumexp_temperature must be positive")
 
         return errors
 
@@ -320,6 +415,7 @@ def load_config(config_path: str | Path) -> DatasetConfig:
     output = _parse_config_section(data, "output", OutputConfig)
     filler = _parse_config_section(data, "filler", FillerConfig)
     probe = _parse_config_section(data, "probe", ProbeConfig)
+    eval_cfg = _parse_config_section(data, "eval", EvalConfig)
 
     config = DatasetConfig(
         tokenizer=tokenizer,
@@ -331,6 +427,7 @@ def load_config(config_path: str | Path) -> DatasetConfig:
         output=output,
         filler=filler,
         probe=probe,
+        eval=eval_cfg,
     )
 
     # Validate
