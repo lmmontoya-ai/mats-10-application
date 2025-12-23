@@ -78,6 +78,15 @@ def parse_args() -> argparse.Namespace:
         help="Number of parallel extraction workers (CUDA only).",
     )
     parser.add_argument(
+        "--workers-per-gpu",
+        type=int,
+        default=1,
+        help=(
+            "Maximum extraction workers to place on each GPU (CUDA only). "
+            "Use >1 to oversubscribe GPUs with multiple model instances."
+        ),
+    )
+    parser.add_argument(
         "--device-map",
         type=str,
         default=None,
@@ -351,6 +360,7 @@ def _extract_worker(
     split: str,
     seed: int,
     layer_idx: int,
+    device_id: int,
     doc_batch_size: int,
     negatives_per_doc: int,
     max_tokens: int | None,
@@ -363,7 +373,7 @@ def _extract_worker(
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for parallel extraction")
 
-    device = torch.device(f"cuda:{rank}")
+    device = torch.device(f"cuda:{device_id}")
     torch.cuda.set_device(device)
 
     config = load_config(config_path)
@@ -439,6 +449,7 @@ def _build_feature_tensor_parallel(
     max_tokens: int | None,
     cache_dir: Path,
     num_workers: int,
+    device_ids: list[int],
     progress_desc: str,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
     if not split_examples:
@@ -446,6 +457,8 @@ def _build_feature_tensor_parallel(
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     shard_ids = _partition_example_ids(split_examples, num_workers)
+    if len(device_ids) != num_workers:
+        raise ValueError("device_ids length must match num_workers")
 
     per_worker_max = max_tokens
     if max_tokens is not None and num_workers > 1:
@@ -476,6 +489,7 @@ def _build_feature_tensor_parallel(
                 split,
                 seed,
                 layer_idx,
+                device_ids[rank],
                 doc_batch_size,
                 negatives_per_doc,
                 per_worker_max,
@@ -641,6 +655,8 @@ def main() -> int:
         raise ValueError("--doc-batch-size must be >= 1")
     if args.extract_workers < 1:
         raise ValueError("--extract-workers must be >= 1")
+    if args.workers_per_gpu < 1:
+        raise ValueError("--workers-per-gpu must be >= 1")
 
     logger.info("Loading configuration from %s", args.config)
     config = load_config(args.config)
@@ -654,6 +670,7 @@ def main() -> int:
     run_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     device_map = _parse_device_map(args.device_map)
     extract_workers = args.extract_workers
+    workers_per_gpu = args.workers_per_gpu
     if device_map is not None and extract_workers > 1:
         raise ValueError("Cannot combine --device-map with --extract-workers > 1")
 
@@ -682,6 +699,7 @@ def main() -> int:
     else:
         logger.info("Loading model %s on %s", config.tokenizer.model_id, device)
 
+    device_ids: list[int] | None = None
     if extract_workers > 1:
         if device.type != "cuda":
             logger.warning(
@@ -695,15 +713,33 @@ def main() -> int:
                     "Only one CUDA device available; falling back to 1 worker."
                 )
                 extract_workers = 1
-            elif extract_workers > available:
-                logger.warning(
-                    "Requested %s extraction workers but only %s CUDA devices "
-                    "available; using %s.",
-                    extract_workers,
-                    available,
-                    available,
-                )
-                extract_workers = available
+            else:
+                max_workers = available * workers_per_gpu
+                if extract_workers > max_workers:
+                    logger.warning(
+                        "Requested %s extraction workers but only %s GPU slots "
+                        "available (%s GPUs * %s workers_per_gpu). Using %s.",
+                        extract_workers,
+                        max_workers,
+                        available,
+                        workers_per_gpu,
+                        max_workers,
+                    )
+                    extract_workers = max_workers
+                if extract_workers > available and workers_per_gpu == 1:
+                    logger.warning(
+                        "Requested %s extraction workers but workers_per_gpu=1; "
+                        "set --workers-per-gpu > 1 to oversubscribe GPUs.",
+                        extract_workers,
+                    )
+                    extract_workers = available
+                device_ids = [idx % available for idx in range(extract_workers)]
+                if len(set(device_ids)) < len(device_ids):
+                    logger.info(
+                        "Oversubscribing GPUs for extraction: %s workers across %s GPUs.",
+                        extract_workers,
+                        available,
+                    )
 
     model_kwargs: dict[str, object] = {
         "dtype": model_dtype,
@@ -768,6 +804,7 @@ def main() -> int:
                         max_tokens=probe_config.max_train_tokens,
                         cache_dir=cache_dir,
                         num_workers=extract_workers,
+                        device_ids=device_ids or list(range(extract_workers)),
                         progress_desc=f"train extraction (L{layer_idx})",
                     )
                 )
@@ -784,6 +821,7 @@ def main() -> int:
                     max_tokens=probe_config.max_val_tokens,
                     cache_dir=cache_dir,
                     num_workers=extract_workers,
+                    device_ids=device_ids or list(range(extract_workers)),
                     progress_desc=f"val extraction (L{layer_idx})",
                 )
             else:
@@ -938,6 +976,8 @@ def main() -> int:
             "input_device": str(input_device),
             "doc_batch_size": args.doc_batch_size,
             "extract_workers": extract_workers,
+            "workers_per_gpu": workers_per_gpu,
+            "extract_device_ids": device_ids,
         },
     )
 
