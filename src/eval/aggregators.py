@@ -54,7 +54,8 @@ def logsumexp_pool(
     length_correction: bool,
 ) -> AggregatorOutput:
     scaled = logits / temperature
-    scaled = scaled.masked_fill(~mask, -1e9)
+    mask_value = torch.finfo(scaled.dtype).min
+    scaled = scaled.masked_fill(~mask, mask_value)
     lse = torch.logsumexp(scaled, dim=1)
     if length_correction:
         lengths = mask.sum(dim=1).clamp_min(1).to(dtype=logits.dtype)
