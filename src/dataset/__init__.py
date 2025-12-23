@@ -5,7 +5,7 @@ This module provides a configuration-driven, deterministic pipeline for generati
 long-context "needle-in-a-haystack" datasets for prompt injection detection.
 """
 
-from .config import DatasetConfig, ProbeConfig, load_config
+from .config import DatasetConfig, EvalConfig, ProbeConfig, load_config
 from .schema import DatasetExample, SplitManifestEntry
 from .templates import TemplateManager, NeedleTemplate, DistractorTemplate
 from .filler import FillerManager
@@ -17,6 +17,7 @@ from .io import DatasetWriter
 
 __all__ = [
     "DatasetConfig",
+    "EvalConfig",
     "ProbeConfig",
     "load_config",
     "DatasetExample",

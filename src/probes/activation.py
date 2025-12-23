@@ -131,6 +131,21 @@ class ActivationExtractor:
             raise RuntimeError("Activation hook did not capture any output")
         return hidden
 
+    def extract_hidden_states(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run the model and return hidden states for all tokens."""
+        hidden = self._capture_hidden(
+            input_ids=input_ids, attention_mask=attention_mask
+        )
+        if hidden.dim() == 2:
+            hidden = hidden.unsqueeze(0)
+        if hidden.dim() != 3:
+            raise RuntimeError(f"Unexpected hidden state shape: {hidden.shape}")
+        return hidden
+
     def extract_selected_tokens(
         self,
         input_ids: torch.Tensor,
