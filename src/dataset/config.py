@@ -131,6 +131,48 @@ class ProbeConfig:
     save_features: bool = False
     output_dir: str = "results/probes"
 
+    def __post_init__(self) -> None:
+        def _coerce_int(value: Any, name: str) -> int | None:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be an integer, not bool")
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                return int(value)
+            return int(str(value))
+
+        def _coerce_float(value: Any, name: str) -> float:
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be a float, not bool")
+            if isinstance(value, (int, float)):
+                return float(value)
+            return float(str(value))
+
+        if self.layers_to_probe is not None:
+            self.layers_to_probe = [
+                _coerce_int(v, "probe.layers_to_probe") for v in self.layers_to_probe
+            ]
+        self.negatives_per_doc = _coerce_int(
+            self.negatives_per_doc, "probe.negatives_per_doc"
+        )
+        self.batch_size = _coerce_int(self.batch_size, "probe.batch_size")
+        self.num_epochs = _coerce_int(self.num_epochs, "probe.num_epochs")
+        self.learning_rate = _coerce_float(self.learning_rate, "probe.learning_rate")
+        if self.l2_grid is not None:
+            self.l2_grid = [_coerce_float(v, "probe.l2_grid") for v in self.l2_grid]
+        if self.train_seeds is not None:
+            self.train_seeds = [
+                _coerce_int(v, "probe.train_seeds") for v in self.train_seeds
+            ]
+        self.max_train_docs = _coerce_int(self.max_train_docs, "probe.max_train_docs")
+        self.max_val_docs = _coerce_int(self.max_val_docs, "probe.max_val_docs")
+        self.max_train_tokens = _coerce_int(
+            self.max_train_tokens, "probe.max_train_tokens"
+        )
+        self.max_val_tokens = _coerce_int(self.max_val_tokens, "probe.max_val_tokens")
+
 
 @dataclass
 class DatasetConfig:

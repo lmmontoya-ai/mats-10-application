@@ -60,6 +60,15 @@ Note: `--extract-workers` cannot be combined with `--device-map`. It shards the
 document set across GPUs and extracts features in parallel; training still runs
 on a single device.
 
+To oversubscribe GPUs with multiple model instances (only if VRAM allows):
+```bash
+python scripts/train_probe.py --config configs/dataset_main.yaml \
+  --extract-workers 4 \
+  --workers-per-gpu 2
+```
+This allows more workers than GPUs by round-robin assignment; it can help if
+your GPUs have headroom, but it can also increase OOM risk.
+
 For multi-GPU sharding (CUDA only), pass a Hugging Face device map:
 ```bash
 python scripts/train_probe.py --config configs/dataset_main.yaml --device-map auto
