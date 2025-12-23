@@ -9,4 +9,5 @@ dependencies = [
     "torch>=2.0.0",
     "pyyaml>=6.0",
     "tqdm>=4.65.0",
+    "accelerate>=1.12.0",
 ]
