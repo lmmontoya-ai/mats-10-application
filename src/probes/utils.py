@@ -9,6 +9,7 @@ import random
 from typing import Literal
 
 import torch
+from transformers import PreTrainedModel
 
 
 def set_seed(seed: int) -> None:
@@ -52,6 +53,22 @@ def resolve_feature_dtype(dtype_name: str) -> torch.dtype:
     if dtype_name == "float16":
         return torch.float16
     raise ValueError(f"Unknown feature dtype: {dtype_name}")
+
+
+def resolve_input_device(
+    model: PreTrainedModel, fallback: torch.device
+) -> torch.device:
+    """Resolve the device where input IDs should be placed."""
+    try:
+        embeddings = model.get_input_embeddings()
+        if embeddings is not None:
+            return embeddings.weight.device
+    except Exception:
+        pass
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        return fallback
 
 
 def disable_tokenizers_parallelism() -> None:
