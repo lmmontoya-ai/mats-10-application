@@ -107,6 +107,32 @@ class FillerConfig:
 
 
 @dataclass
+class ProbeConfig:
+    """Configuration for token-level probe training."""
+
+    layers_to_probe: list[int] = field(default_factory=lambda: [16])
+    activation_site: str = "resid_post"
+    negatives_per_doc: int = 128
+    train_length_buckets: list[int] | None = None
+    val_length_buckets: list[int] | None = None
+    max_train_docs: int | None = None
+    max_val_docs: int | None = None
+    max_train_tokens: int | None = None
+    max_val_tokens: int | None = None
+    batch_size: int = 256
+    num_epochs: int = 3
+    learning_rate: float = 1e-3
+    l2_grid: list[float] = field(default_factory=lambda: [0.0, 1e-4, 1e-3, 1e-2])
+    class_balance: str = "weighted"  # weighted | downsample
+    train_seeds: list[int] = field(default_factory=lambda: [0])
+    device: str = "auto"  # auto | cpu | cuda | mps
+    model_dtype: str = "auto"  # auto | float32 | float16 | bfloat16
+    feature_dtype: str = "float32"  # float32 | float16
+    save_features: bool = False
+    output_dir: str = "results/probes"
+
+
+@dataclass
 class DatasetConfig:
     """
     Complete configuration for dataset generation.
@@ -122,6 +148,7 @@ class DatasetConfig:
     splits: SplitsConfig
     output: OutputConfig
     filler: FillerConfig
+    probe: ProbeConfig = field(default_factory=ProbeConfig)
 
     def __post_init__(self) -> None:
         """Derive dependent seeds if not specified."""
@@ -250,6 +277,7 @@ def load_config(config_path: str | Path) -> DatasetConfig:
     splits = _parse_config_section(data, "splits", SplitsConfig)
     output = _parse_config_section(data, "output", OutputConfig)
     filler = _parse_config_section(data, "filler", FillerConfig)
+    probe = _parse_config_section(data, "probe", ProbeConfig)
 
     config = DatasetConfig(
         tokenizer=tokenizer,
@@ -260,6 +288,7 @@ def load_config(config_path: str | Path) -> DatasetConfig:
         splits=splits,
         output=output,
         filler=filler,
+        probe=probe,
     )
 
     # Validate

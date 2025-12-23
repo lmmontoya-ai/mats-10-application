@@ -112,3 +112,36 @@ filler:
   # Segment length constraints (in estimated tokens)
   min_segment_tokens: 50
   max_segment_tokens: 500
+
+# Probe training configuration (Task 2)
+probe:
+  # Layers to probe (set based on model depth)
+  layers_to_probe: [16]
+
+  # Activation site for the probe (currently supports resid_post)
+  activation_site: "resid_post"
+
+  # Token sampling
+  negatives_per_doc: 128
+  # Restrict train/val to specific length buckets (null = all)
+  train_length_buckets: null
+  val_length_buckets: null
+  max_train_docs: null
+  max_val_docs: null
+  max_train_tokens: null
+  max_val_tokens: null
+
+  # Training hyperparameters
+  batch_size: 256
+  num_epochs: 3
+  learning_rate: 1e-3
+  l2_grid: [0.0, 1e-4, 1e-3, 1e-2]
+  class_balance: "weighted"
+  train_seeds: [0]
+
+  # Runtime
+  device: "auto"
+  model_dtype: "auto"
+  feature_dtype: "float32"
+  save_features: false
+  output_dir: "results/probes"
