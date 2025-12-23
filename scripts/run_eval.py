@@ -218,6 +218,11 @@ def _score_split(
 
         with torch.inference_mode():
             hidden = extractor.extract_hidden_states(input_ids, attention_mask)
+            if (
+                linear.weight.dtype != hidden.dtype
+                or linear.weight.device != hidden.device
+            ):
+                linear.to(device=hidden.device, dtype=hidden.dtype)
             logits = linear(hidden).squeeze(-1)
 
             agg_outputs: dict[str, AggregatorOutput] = {}
