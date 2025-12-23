@@ -1,0 +1,34 @@
+{
+  "model_id": "google/gemma-3-4b-it",
+  "tokenizer": {
+    "model_id": "google/gemma-3-4b-it",
+    "tokenizer_id": "google/gemma-3-4b-it",
+    "tokenizer_revision": null,
+    "tokenizer_class": "GemmaTokenizerFast",
+    "is_fast": true,
+    "supports_offsets": true
+  },
+  "layer_idx": 16,
+  "activation_site": "resid_post",
+  "train_seed": 0,
+  "selected_l2": 0.0,
+  "train_stats": {
+    "docs": 7200,
+    "tokens": 962675,
+    "positives": 41075,
+    "negatives": 921600
+  },
+  "val_stats": {
+    "docs": 2400,
+    "tokens": 320709,
+    "positives": 13509,
+    "negatives": 307200
+  },
+  "val_metrics": {
+    "accuracy": 0.9578777022160276,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "auroc": 0.5193997621536255
+  }
+}
