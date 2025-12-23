@@ -216,18 +216,19 @@ def _score_split(
         attention_mask = enc["attention_mask"].to(extractor.device)
         mask = attention_mask.bool()
 
-        hidden = extractor.extract_hidden_states(input_ids, attention_mask)
-        logits = linear(hidden).squeeze(-1)
+        with torch.inference_mode():
+            hidden = extractor.extract_hidden_states(input_ids, attention_mask)
+            logits = linear(hidden).squeeze(-1)
 
-        agg_outputs: dict[str, AggregatorOutput] = {}
-        for name, fn in aggregators.items():
-            agg_outputs[name] = fn(logits, mask)
+            agg_outputs: dict[str, AggregatorOutput] = {}
+            for name, fn in aggregators.items():
+                agg_outputs[name] = fn(logits, mask)
 
-        max_indices = None
-        max_probs = None
-        if capture_max_index and "max" in agg_outputs:
-            max_indices = agg_outputs["max"].extras.get("max_token_index")
-            max_probs = agg_outputs["max"].extras.get("max_token_prob")
+            max_indices = None
+            max_probs = None
+            if capture_max_index and "max" in agg_outputs:
+                max_indices = agg_outputs["max"].extras.get("max_token_index")
+                max_probs = agg_outputs["max"].extras.get("max_token_prob")
 
         for idx, ex in enumerate(batch_examples):
             row: dict[str, object] = {
