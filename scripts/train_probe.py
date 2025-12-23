@@ -33,6 +33,7 @@ from src.probes.utils import (
     resolve_device,
     resolve_dtype,
     resolve_feature_dtype,
+    resolve_input_device,
     set_seed,
 )
 
@@ -66,7 +67,28 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of documents per forward pass.",
     )
+    parser.add_argument(
+        "--device-map",
+        type=str,
+        default=None,
+        help=(
+            "Hugging Face device_map setting for model sharding "
+            "(e.g. 'auto', 'balanced', 'sequential')."
+        ),
+    )
     return parser.parse_args()
+
+
+def _parse_device_map(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if lowered in {"none", "single", "disabled"}:
+        return None
+    return cleaned
 
 
 def _get_git_commit(repo_root: Path) -> str | None:
@@ -311,6 +333,7 @@ def _write_run_record(
     run_end: str,
     metrics_path: Path,
     selected_by_layer: dict[int, dict[str, float | int | str]],
+    runtime_info: dict[str, object] | None = None,
 ) -> Path:
     repo_root = Path(__file__).parent.parent
     run_records_dir = repo_root / "results" / "run_records"
@@ -330,6 +353,7 @@ def _write_run_record(
         "metrics_path": str(metrics_path),
         "outputs_dir": str(output_dir),
         "git_commit": _get_git_commit(repo_root),
+        "runtime": runtime_info or {},
     }
 
     path = (
@@ -361,6 +385,7 @@ def main() -> int:
         raise ValueError("probe.class_balance must be 'weighted' or 'downsample'")
 
     run_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    device_map = _parse_device_map(args.device_map)
 
     tokenizer = TokenizerWrapper(config.tokenizer)
     examples = _load_examples(config)
@@ -369,15 +394,39 @@ def main() -> int:
     model_dtype = resolve_dtype(probe_config.model_dtype, device)
     feature_dtype = resolve_feature_dtype(probe_config.feature_dtype)
 
-    logger.info("Loading model %s on %s", config.tokenizer.model_id, device)
+    if device_map is not None:
+        if device.type != "cuda":
+            logger.warning(
+                "device_map is set but resolved device is %s; multi-GPU sharding "
+                "requires CUDA.",
+                device.type,
+            )
+        logger.info(
+            "Loading model %s with device_map=%s", config.tokenizer.model_id, device_map
+        )
+        if torch.cuda.device_count() < 2:
+            logger.warning(
+                "device_map is set but fewer than 2 CUDA devices are available."
+            )
+    else:
+        logger.info("Loading model %s on %s", config.tokenizer.model_id, device)
+
+    model_kwargs: dict[str, object] = {
+        "dtype": model_dtype,
+        "trust_remote_code": True,
+    }
+    if device_map is not None:
+        model_kwargs["device_map"] = device_map
+        model_kwargs["low_cpu_mem_usage"] = True
+
     model = AutoModelForCausalLM.from_pretrained(
-        config.tokenizer.model_id,
-        dtype=model_dtype,
-        trust_remote_code=True,
+        config.tokenizer.model_id, **model_kwargs
     )
-    model.to(device)
+    if device_map is None:
+        model.to(device)
     model.eval()
 
+    input_device = resolve_input_device(model, fallback=device)
     layers, layer_path = resolve_transformer_layers(model)
     logger.info("Resolved %d layers at %s", len(layers), layer_path)
 
@@ -399,7 +448,7 @@ def main() -> int:
                 model=model,
                 layer_idx=layer_idx,
                 activation_site=probe_config.activation_site,
-                device=device,
+                device=input_device,
                 feature_dtype=feature_dtype,
             )
 
@@ -540,6 +589,12 @@ def main() -> int:
         run_end=run_end,
         metrics_path=metrics_path,
         selected_by_layer=selected_by_layer,
+        runtime_info={
+            "device": str(device),
+            "device_map": device_map,
+            "input_device": str(input_device),
+            "doc_batch_size": args.doc_batch_size,
+        },
     )
 
     logger.info("Probe training complete. Metrics written to %s", metrics_path)

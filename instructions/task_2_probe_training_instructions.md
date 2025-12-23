@@ -52,6 +52,12 @@ For faster extraction, batch multiple documents per forward pass:
 python scripts/train_probe.py --config configs/dataset_main.yaml --doc-batch-size 2
 ```
 
+For multi-GPU sharding (CUDA only), pass a Hugging Face device map:
+```bash
+python scripts/train_probe.py --config configs/dataset_main.yaml --device-map auto
+```
+Note: `device_map` is intended for CUDA GPUs; it is not supported on MPS.
+
 The script will:
 - Load config and dataset.
 - Load the model and hook the specified layer(s).
@@ -95,6 +101,7 @@ After training:
 - OOM / slow runs:
   - Reduce `max_train_docs`, `max_val_docs`, or `negatives_per_doc`.
   - Set `model_dtype: float16` or `bfloat16`.
+  - Use `--device-map auto` on multi-GPU CUDA systems to shard the model.
 - Poor metrics:
   - Try more negatives per doc.
   - Try different layers via `layers_to_probe`.
