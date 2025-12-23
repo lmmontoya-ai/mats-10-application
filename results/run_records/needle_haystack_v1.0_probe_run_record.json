@@ -1,0 +1,83 @@
+{
+  "stage": "probe_training",
+  "run_id": "needle_haystack_v1.0",
+  "dataset_name": "needle_haystack",
+  "dataset_version": "v1.0",
+  "timestamps": {
+    "start": "2025-12-23T19:37:31Z",
+    "end": "2025-12-23T21:22:14Z"
+  },
+  "model_id": "google/gemma-3-4b-it",
+  "tokenizer": {
+    "model_id": "google/gemma-3-4b-it",
+    "tokenizer_id": "google/gemma-3-4b-it",
+    "tokenizer_revision": null,
+    "tokenizer_class": "GemmaTokenizerFast",
+    "is_fast": true,
+    "supports_offsets": true
+  },
+  "probe_config": {
+    "layers_to_probe": [
+      16
+    ],
+    "activation_site": "resid_post",
+    "negatives_per_doc": 128,
+    "train_length_buckets": null,
+    "val_length_buckets": null,
+    "max_train_docs": null,
+    "max_val_docs": null,
+    "max_train_tokens": null,
+    "max_val_tokens": null,
+    "batch_size": 256,
+    "num_epochs": 3,
+    "learning_rate": 0.001,
+    "l2_grid": [
+      0.0,
+      0.0001,
+      0.001,
+      0.01
+    ],
+    "class_balance": "weighted",
+    "train_seeds": [
+      0
+    ],
+    "device": "auto",
+    "model_dtype": "auto",
+    "feature_dtype": "float32",
+    "save_features": false,
+    "output_dir": "results/probes"
+  },
+  "hyperparameters_searched": {
+    "l2_grid": [
+      0.0,
+      0.0001,
+      0.001,
+      0.01
+    ]
+  },
+  "selected_hyperparameters": {
+    "16": {
+      "0": {
+        "seed": 0,
+        "selected_l2": 0.0,
+        "accuracy": 0.9578777022160276,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "auroc": 0.5193997621536255
+      }
+    }
+  },
+  "metrics_path": "results/probes/needle_haystack_v1.0/probe_metrics.csv",
+  "outputs_dir": "results/probes/needle_haystack_v1.0",
+  "git_commit": "7950237854da4f7c345d18d14fab8e3712741c2c",
+  "runtime": {
+    "device": "cuda",
+    "device_map": null,
+    "input_device": "cuda:0",
+    "doc_batch_size": 1,
+    "extract_workers": 1,
+    "workers_per_gpu": 1,
+    "extract_device_ids": null
+  }
+}
