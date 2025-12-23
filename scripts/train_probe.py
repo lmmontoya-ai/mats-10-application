@@ -9,11 +9,15 @@ import argparse
 import csv
 import json
 import logging
+import math
+import multiprocessing as mp
 import random
+import queue as queue_module
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import torch
 from transformers import AutoModelForCausalLM
@@ -68,6 +72,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of documents per forward pass.",
     )
     parser.add_argument(
+        "--extract-workers",
+        type=int,
+        default=1,
+        help="Number of parallel extraction workers (CUDA only).",
+    )
+    parser.add_argument(
         "--device-map",
         type=str,
         default=None,
@@ -105,15 +115,28 @@ def _get_git_commit(repo_root: Path) -> str | None:
         return None
 
 
-def _load_examples(config: DatasetConfig) -> list[DatasetExample]:
-    dataset_path = (
+def _get_dataset_path(config: DatasetConfig) -> Path:
+    return (
         Path(config.output.output_root)
         / "datasets"
         / f"{config.output.dataset_name}_{config.output.dataset_version}.jsonl"
     )
+
+
+def _load_examples(config: DatasetConfig) -> list[DatasetExample]:
+    dataset_path = _get_dataset_path(config)
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
     return list(DatasetReader.read_jsonl(dataset_path))
+
+
+def _load_examples_by_ids(dataset_path: Path, ids: list[str]) -> list[DatasetExample]:
+    if not ids:
+        return []
+    id_set = set(ids)
+    selected = [ex for ex in DatasetReader.read_jsonl(dataset_path) if ex.id in id_set]
+    id_to_example = {ex.id: ex for ex in selected}
+    return [id_to_example[ex_id] for ex_id in ids if ex_id in id_to_example]
 
 
 def _filter_examples(
@@ -148,32 +171,31 @@ def _sample_negatives(
     return rng.sample(candidates, n_negatives)
 
 
-def _build_feature_tensor(
-    examples: list[DatasetExample],
+def _build_feature_tensor_from_examples(
+    split_examples: list[DatasetExample],
     extractor: ActivationExtractor,
     tokenizer: TokenizerWrapper,
-    split: str,
     seed: int,
     negatives_per_doc: int,
-    max_docs: int | None,
     max_tokens: int | None,
-    length_buckets: list[int] | None,
     feature_dtype: torch.dtype,
     doc_batch_size: int,
+    progress_desc: str | None = None,
+    show_progress: bool = True,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
-    rng = random.Random(seed)
-    split_examples = _filter_examples(examples, split, seed, max_docs, length_buckets)
-
     features_list: list[torch.Tensor] = []
     labels_list: list[torch.Tensor] = []
     total_tokens = 0
 
-    progress = tqdm(
-        total=len(split_examples),
-        desc=f"{split} extraction",
-        unit="docs",
-        dynamic_ncols=True,
-    )
+    progress = None
+    if show_progress:
+        progress = tqdm(
+            total=len(split_examples),
+            desc=progress_desc or "extraction",
+            unit="docs",
+            dynamic_ncols=True,
+        )
 
     for start in range(0, len(split_examples), doc_batch_size):
         batch_examples = split_examples[start : start + doc_batch_size]
@@ -258,16 +280,20 @@ def _build_feature_tensor(
             features_list.append(features.to(dtype=feature_dtype))
             labels_list.append(labels)
 
-        progress.update(len(batch_examples))
-        progress.set_postfix(tokens=total_tokens)
+        if progress is not None:
+            progress.update(len(batch_examples))
+            progress.set_postfix(tokens=total_tokens)
+        if progress_callback is not None:
+            progress_callback(len(batch_examples))
 
         if max_tokens is not None and total_tokens >= max_tokens:
             break
 
-    progress.close()
+    if progress is not None:
+        progress.close()
 
     if not features_list:
-        raise RuntimeError(f"No features extracted for split {split}")
+        raise RuntimeError("No features extracted")
 
     features = torch.cat(features_list, dim=0)
     labels = torch.cat(labels_list, dim=0)
@@ -277,6 +303,242 @@ def _build_feature_tensor(
         "positives": int(labels.sum().item()),
         "negatives": int((labels == 0).sum().item()),
     }
+    return features, labels, stats
+
+
+def _build_feature_tensor(
+    examples: list[DatasetExample],
+    extractor: ActivationExtractor,
+    tokenizer: TokenizerWrapper,
+    split: str,
+    seed: int,
+    negatives_per_doc: int,
+    max_docs: int | None,
+    max_tokens: int | None,
+    length_buckets: list[int] | None,
+    feature_dtype: torch.dtype,
+    doc_batch_size: int,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+    split_examples = _filter_examples(examples, split, seed, max_docs, length_buckets)
+    return _build_feature_tensor_from_examples(
+        split_examples=split_examples,
+        extractor=extractor,
+        tokenizer=tokenizer,
+        seed=seed,
+        negatives_per_doc=negatives_per_doc,
+        max_tokens=max_tokens,
+        feature_dtype=feature_dtype,
+        doc_batch_size=doc_batch_size,
+        progress_desc=f"{split} extraction",
+        show_progress=True,
+    )
+
+
+def _partition_example_ids(
+    examples: list[DatasetExample], num_workers: int
+) -> list[list[str]]:
+    shards: list[list[str]] = [[] for _ in range(num_workers)]
+    for idx, ex in enumerate(examples):
+        shards[idx % num_workers].append(ex.id)
+    return shards
+
+
+def _extract_worker(
+    rank: int,
+    config_path: str,
+    dataset_path: str,
+    example_ids: list[str],
+    split: str,
+    seed: int,
+    layer_idx: int,
+    doc_batch_size: int,
+    negatives_per_doc: int,
+    max_tokens: int | None,
+    output_path: str,
+    progress_queue: mp.Queue | None,
+) -> None:
+    disable_tokenizers_parallelism()
+    torch.set_num_threads(1)
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for parallel extraction")
+
+    device = torch.device(f"cuda:{rank}")
+    torch.cuda.set_device(device)
+
+    config = load_config(config_path)
+    tokenizer = TokenizerWrapper(config.tokenizer)
+    probe_config = config.probe
+
+    model_dtype = resolve_dtype(probe_config.model_dtype, device)
+    feature_dtype = resolve_feature_dtype(probe_config.feature_dtype)
+
+    model = AutoModelForCausalLM.from_pretrained(
+        config.tokenizer.model_id,
+        dtype=model_dtype,
+        trust_remote_code=True,
+    )
+    model.to(device)
+    model.eval()
+
+    extractor = ActivationExtractor(
+        model=model,
+        layer_idx=layer_idx,
+        activation_site=probe_config.activation_site,
+        device=device,
+        feature_dtype=feature_dtype,
+    )
+
+    if not example_ids:
+        empty_stats = {"docs": 0, "tokens": 0, "positives": 0, "negatives": 0}
+        torch.save(
+            {
+                "features": torch.empty((0, 0), dtype=feature_dtype),
+                "labels": torch.empty((0,), dtype=torch.float32),
+                "stats": empty_stats,
+            },
+            output_path,
+        )
+        return
+
+    examples = _load_examples_by_ids(Path(dataset_path), example_ids)
+
+    def _progress(count: int) -> None:
+        if progress_queue is not None:
+            progress_queue.put(count)
+
+    features, labels, stats = _build_feature_tensor_from_examples(
+        split_examples=examples,
+        extractor=extractor,
+        tokenizer=tokenizer,
+        seed=seed,
+        negatives_per_doc=negatives_per_doc,
+        max_tokens=max_tokens,
+        feature_dtype=feature_dtype,
+        doc_batch_size=doc_batch_size,
+        progress_desc=None,
+        show_progress=False,
+        progress_callback=_progress,
+    )
+
+    torch.save(
+        {"features": features, "labels": labels, "stats": stats},
+        output_path,
+    )
+
+
+def _build_feature_tensor_parallel(
+    split_examples: list[DatasetExample],
+    config_path: str,
+    dataset_path: Path,
+    split: str,
+    seed: int,
+    layer_idx: int,
+    doc_batch_size: int,
+    negatives_per_doc: int,
+    max_tokens: int | None,
+    cache_dir: Path,
+    num_workers: int,
+    progress_desc: str,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+    if not split_examples:
+        raise RuntimeError(f"No examples found for split {split}")
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    shard_ids = _partition_example_ids(split_examples, num_workers)
+
+    per_worker_max = max_tokens
+    if max_tokens is not None and num_workers > 1:
+        per_worker_max = math.ceil(max_tokens / num_workers)
+        logger.warning(
+            "Parallel extraction splits max_tokens=%s across %s workers "
+            "(per-worker cap=%s).",
+            max_tokens,
+            num_workers,
+            per_worker_max,
+        )
+
+    ctx = mp.get_context("spawn")
+    progress_queue: mp.Queue | None = ctx.Queue()
+    processes: list[mp.Process] = []
+    shard_paths: list[Path] = []
+
+    for rank in range(num_workers):
+        shard_path = cache_dir / f"{split}_layer_{layer_idx}_seed_{seed}_rank_{rank}.pt"
+        shard_paths.append(shard_path)
+        proc = ctx.Process(
+            target=_extract_worker,
+            args=(
+                rank,
+                config_path,
+                str(dataset_path),
+                shard_ids[rank],
+                split,
+                seed,
+                layer_idx,
+                doc_batch_size,
+                negatives_per_doc,
+                per_worker_max,
+                str(shard_path),
+                progress_queue,
+            ),
+        )
+        proc.start()
+        processes.append(proc)
+
+    total_docs = len(split_examples)
+    progress = tqdm(
+        total=total_docs,
+        desc=progress_desc,
+        unit="docs",
+        dynamic_ncols=True,
+    )
+    processed = 0
+
+    while processed < total_docs:
+        try:
+            delta = progress_queue.get(timeout=0.5) if progress_queue else 0
+            processed += delta
+            progress.update(delta)
+        except queue_module.Empty:
+            if not any(proc.is_alive() for proc in processes):
+                break
+
+    progress.close()
+
+    for proc in processes:
+        proc.join()
+        if proc.exitcode != 0:
+            raise RuntimeError(
+                f"Extraction worker failed for split {split} (exitcode={proc.exitcode})"
+            )
+
+    features_list: list[torch.Tensor] = []
+    labels_list: list[torch.Tensor] = []
+    stats = {"docs": 0, "tokens": 0, "positives": 0, "negatives": 0}
+
+    for shard_path in shard_paths:
+        data = torch.load(shard_path, map_location="cpu")
+        shard_features = data.get("features")
+        shard_labels = data.get("labels")
+        shard_stats = data.get("stats", {})
+
+        if isinstance(shard_stats, dict):
+            stats["docs"] += int(shard_stats.get("docs", 0))
+            stats["tokens"] += int(shard_stats.get("tokens", 0))
+            stats["positives"] += int(shard_stats.get("positives", 0))
+            stats["negatives"] += int(shard_stats.get("negatives", 0))
+
+        if isinstance(shard_features, torch.Tensor) and shard_features.numel() > 0:
+            features_list.append(shard_features)
+        if isinstance(shard_labels, torch.Tensor) and shard_labels.numel() > 0:
+            labels_list.append(shard_labels)
+
+    if not features_list or not labels_list:
+        raise RuntimeError(f"No features extracted for split {split}")
+
+    features = torch.cat(features_list, dim=0)
+    labels = torch.cat(labels_list, dim=0)
     return features, labels, stats
 
 
@@ -375,6 +637,11 @@ def main() -> int:
 
     disable_tokenizers_parallelism()
 
+    if args.doc_batch_size < 1:
+        raise ValueError("--doc-batch-size must be >= 1")
+    if args.extract_workers < 1:
+        raise ValueError("--extract-workers must be >= 1")
+
     logger.info("Loading configuration from %s", args.config)
     config = load_config(args.config)
 
@@ -386,8 +653,12 @@ def main() -> int:
 
     run_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     device_map = _parse_device_map(args.device_map)
+    extract_workers = args.extract_workers
+    if device_map is not None and extract_workers > 1:
+        raise ValueError("Cannot combine --device-map with --extract-workers > 1")
 
     tokenizer = TokenizerWrapper(config.tokenizer)
+    dataset_path = _get_dataset_path(config)
     examples = _load_examples(config)
 
     device = resolve_device(probe_config.device)
@@ -410,6 +681,29 @@ def main() -> int:
             )
     else:
         logger.info("Loading model %s on %s", config.tokenizer.model_id, device)
+
+    if extract_workers > 1:
+        if device.type != "cuda":
+            logger.warning(
+                "Parallel extraction requires CUDA; falling back to 1 worker."
+            )
+            extract_workers = 1
+        else:
+            available = torch.cuda.device_count()
+            if available < 2:
+                logger.warning(
+                    "Only one CUDA device available; falling back to 1 worker."
+                )
+                extract_workers = 1
+            elif extract_workers > available:
+                logger.warning(
+                    "Requested %s extraction workers but only %s CUDA devices "
+                    "available; using %s.",
+                    extract_workers,
+                    available,
+                    available,
+                )
+                extract_workers = available
 
     model_kwargs: dict[str, object] = {
         "dtype": model_dtype,
@@ -434,6 +728,7 @@ def main() -> int:
     run_id = f"{config.output.dataset_name}_{config.output.dataset_version}"
     run_dir = output_root / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = run_dir / "feature_cache"
 
     metrics_rows: list[dict[str, float | int | str]] = []
     selected_by_layer: dict[int, dict[int, dict[str, float | int | str]]] = {}
@@ -444,41 +739,89 @@ def main() -> int:
         for layer_idx in probe_config.layers_to_probe:
             logger.info("Training probe for layer %s (seed=%s)", layer_idx, seed)
 
-            extractor = ActivationExtractor(
-                model=model,
-                layer_idx=layer_idx,
-                activation_site=probe_config.activation_site,
-                device=input_device,
-                feature_dtype=feature_dtype,
-            )
+            if extract_workers > 1:
+                train_examples = _filter_examples(
+                    examples=examples,
+                    split="train",
+                    seed=seed,
+                    max_docs=probe_config.max_train_docs,
+                    length_buckets=probe_config.train_length_buckets,
+                )
+                val_examples = _filter_examples(
+                    examples=examples,
+                    split="val",
+                    seed=seed + 1,
+                    max_docs=probe_config.max_val_docs,
+                    length_buckets=probe_config.val_length_buckets,
+                )
 
-            train_features, train_labels, train_stats = _build_feature_tensor(
-                examples=examples,
-                extractor=extractor,
-                tokenizer=tokenizer,
-                split="train",
-                seed=seed,
-                negatives_per_doc=probe_config.negatives_per_doc,
-                max_docs=probe_config.max_train_docs,
-                max_tokens=probe_config.max_train_tokens,
-                length_buckets=probe_config.train_length_buckets,
-                feature_dtype=feature_dtype,
-                doc_batch_size=args.doc_batch_size,
-            )
+                train_features, train_labels, train_stats = (
+                    _build_feature_tensor_parallel(
+                        split_examples=train_examples,
+                        config_path=args.config,
+                        dataset_path=dataset_path,
+                        split="train",
+                        seed=seed,
+                        layer_idx=layer_idx,
+                        doc_batch_size=args.doc_batch_size,
+                        negatives_per_doc=probe_config.negatives_per_doc,
+                        max_tokens=probe_config.max_train_tokens,
+                        cache_dir=cache_dir,
+                        num_workers=extract_workers,
+                        progress_desc=f"train extraction (L{layer_idx})",
+                    )
+                )
 
-            val_features, val_labels, val_stats = _build_feature_tensor(
-                examples=examples,
-                extractor=extractor,
-                tokenizer=tokenizer,
-                split="val",
-                seed=seed + 1,
-                negatives_per_doc=probe_config.negatives_per_doc,
-                max_docs=probe_config.max_val_docs,
-                max_tokens=probe_config.max_val_tokens,
-                length_buckets=probe_config.val_length_buckets,
-                feature_dtype=feature_dtype,
-                doc_batch_size=args.doc_batch_size,
-            )
+                val_features, val_labels, val_stats = _build_feature_tensor_parallel(
+                    split_examples=val_examples,
+                    config_path=args.config,
+                    dataset_path=dataset_path,
+                    split="val",
+                    seed=seed + 1,
+                    layer_idx=layer_idx,
+                    doc_batch_size=args.doc_batch_size,
+                    negatives_per_doc=probe_config.negatives_per_doc,
+                    max_tokens=probe_config.max_val_tokens,
+                    cache_dir=cache_dir,
+                    num_workers=extract_workers,
+                    progress_desc=f"val extraction (L{layer_idx})",
+                )
+            else:
+                extractor = ActivationExtractor(
+                    model=model,
+                    layer_idx=layer_idx,
+                    activation_site=probe_config.activation_site,
+                    device=input_device,
+                    feature_dtype=feature_dtype,
+                )
+
+                train_features, train_labels, train_stats = _build_feature_tensor(
+                    examples=examples,
+                    extractor=extractor,
+                    tokenizer=tokenizer,
+                    split="train",
+                    seed=seed,
+                    negatives_per_doc=probe_config.negatives_per_doc,
+                    max_docs=probe_config.max_train_docs,
+                    max_tokens=probe_config.max_train_tokens,
+                    length_buckets=probe_config.train_length_buckets,
+                    feature_dtype=feature_dtype,
+                    doc_batch_size=args.doc_batch_size,
+                )
+
+                val_features, val_labels, val_stats = _build_feature_tensor(
+                    examples=examples,
+                    extractor=extractor,
+                    tokenizer=tokenizer,
+                    split="val",
+                    seed=seed + 1,
+                    negatives_per_doc=probe_config.negatives_per_doc,
+                    max_docs=probe_config.max_val_docs,
+                    max_tokens=probe_config.max_val_tokens,
+                    length_buckets=probe_config.val_length_buckets,
+                    feature_dtype=feature_dtype,
+                    doc_batch_size=args.doc_batch_size,
+                )
 
             if probe_config.class_balance == "downsample":
                 train_features, train_labels = _downsample_negatives(
@@ -594,6 +937,7 @@ def main() -> int:
             "device_map": device_map,
             "input_device": str(input_device),
             "doc_batch_size": args.doc_batch_size,
+            "extract_workers": extract_workers,
         },
     )
 
