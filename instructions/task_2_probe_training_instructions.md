@@ -52,6 +52,14 @@ For faster extraction, batch multiple documents per forward pass:
 python scripts/train_probe.py --config configs/dataset_main.yaml --doc-batch-size 2
 ```
 
+For multi-GPU data-parallel extraction (CUDA only):
+```bash
+python scripts/train_probe.py --config configs/dataset_main.yaml --extract-workers 4
+```
+Note: `--extract-workers` cannot be combined with `--device-map`. It shards the
+document set across GPUs and extracts features in parallel; training still runs
+on a single device.
+
 For multi-GPU sharding (CUDA only), pass a Hugging Face device map:
 ```bash
 python scripts/train_probe.py --config configs/dataset_main.yaml --device-map auto
