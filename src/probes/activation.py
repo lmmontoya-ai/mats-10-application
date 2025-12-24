@@ -144,7 +144,8 @@ class ActivationExtractor:
             hidden = hidden.unsqueeze(0)
         if hidden.dim() != 3:
             raise RuntimeError(f"Unexpected hidden state shape: {hidden.shape}")
-        return hidden
+        # Convert to feature_dtype to match training (avoids bfloat16 precision issues)
+        return hidden.to(dtype=self.feature_dtype)
 
     def extract_selected_tokens(
         self,
