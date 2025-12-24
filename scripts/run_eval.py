@@ -541,6 +541,15 @@ def main() -> int:
                 dtype=torch.float32,
             )
 
+            if (
+                not torch.isfinite(val_scores).all()
+                or not torch.isfinite(test_scores).all()
+            ):
+                raise RuntimeError(
+                    f"Non-finite scores for aggregator '{agg_name}'. "
+                    "Check probe weights and feature extraction."
+                )
+
             calibrators = {
                 "uncalibrated": IdentityCalibrator(),
             }
