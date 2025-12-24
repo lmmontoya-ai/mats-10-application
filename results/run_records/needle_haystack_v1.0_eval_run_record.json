@@ -4,8 +4,8 @@
   "dataset_name": "needle_haystack",
   "dataset_version": "v1.0",
   "timestamps": {
-    "start": "2025-12-23T23:51:31Z",
-    "end": "2025-12-24T00:57:21Z"
+    "start": "2025-12-24T06:31:50Z",
+    "end": "2025-12-24T07:35:55Z"
   },
   "model_id": "google/gemma-3-4b-it",
   "tokenizer_id": "google/gemma-3-4b-it",
@@ -39,7 +39,7 @@
     "plot_layer_metric": "fpr_at_tpr_0.95"
   },
   "metrics_path": "results/metrics/needle_haystack_v1.0_eval_metrics.csv",
-  "git_commit": "6103bcdb3710223080e4c7ceb008501c590222d4",
+  "git_commit": "31f312ed04f3e26ea692840c2ac286edbda6a999",
   "runtime": {
     "device": "cuda",
     "device_map": null,
