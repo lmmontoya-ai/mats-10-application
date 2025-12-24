@@ -572,6 +572,26 @@ def _downsample_negatives(
     return features[keep], labels[keep]
 
 
+def _filter_nonfinite_features(
+    features: torch.Tensor, labels: torch.Tensor, split: str
+) -> tuple[torch.Tensor, torch.Tensor, int]:
+    if features.numel() == 0:
+        return features, labels, 0
+    finite_mask = torch.isfinite(features).all(dim=1)
+    dropped = int((~finite_mask).sum().item())
+    if dropped:
+        logger.warning(
+            "Dropping %s non-finite feature rows in %s split.",
+            dropped,
+            split,
+        )
+        features = features[finite_mask]
+        labels = labels[finite_mask]
+    if features.numel() == 0:
+        raise RuntimeError(f"All features are non-finite for split {split}")
+    return features, labels, dropped
+
+
 def _write_metrics_csv(path: Path, rows: list[dict[str, float | int | str]]) -> None:
     if not rows:
         return
@@ -866,6 +886,13 @@ def main() -> int:
                     train_features, train_labels, seed
                 )
 
+            train_features, train_labels, _ = _filter_nonfinite_features(
+                train_features, train_labels, "train"
+            )
+            val_features, val_labels, _ = _filter_nonfinite_features(
+                val_features, val_labels, "val"
+            )
+
             train_features = train_features.to(dtype=torch.float32)
             train_labels = train_labels.to(dtype=torch.float32)
             val_features = val_features.to(dtype=torch.float32)
@@ -890,6 +917,17 @@ def main() -> int:
                     l2_weight=l2_weight,
                     device=device,
                 )
+
+                if not all(
+                    torch.isfinite(param).all().item()
+                    for param in model_probe.parameters()
+                ):
+                    logger.warning(
+                        "Non-finite probe parameters for layer %s (l2=%s); skipping.",
+                        layer_idx,
+                        l2_weight,
+                    )
+                    continue
 
                 metrics_train = evaluate_linear_probe(
                     model_probe,
