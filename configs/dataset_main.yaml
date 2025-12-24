@@ -141,7 +141,7 @@ probe:
 
   # Runtime
   device: "auto"
-  model_dtype: "auto"
+  model_dtype: "bfloat16"
   feature_dtype: "float32"
   save_features: false
   output_dir: "results/probes"

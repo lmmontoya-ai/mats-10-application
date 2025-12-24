@@ -34,7 +34,11 @@ def resolve_device(device: str) -> torch.device:
 def resolve_dtype(dtype_name: str, device: torch.device) -> torch.dtype:
     """Resolve model dtype from config string."""
     if dtype_name == "auto":
-        if device.type in {"cuda", "mps"}:
+        if device.type == "cuda":
+            # Prefer bfloat16 on CUDA for modern models (e.g., Gemma, Llama)
+            # that can overflow in float16 due to large residual stream values
+            return torch.bfloat16
+        if device.type == "mps":
             return torch.float16
         return torch.float32
     if dtype_name == "float32":
