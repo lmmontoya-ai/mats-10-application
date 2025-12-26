@@ -171,13 +171,60 @@ def _sample_negatives(
     positive_indices: set[int],
     n_negatives: int,
     rng: random.Random,
+    exclude_indices: set[int] | None = None,
 ) -> list[int]:
-    candidates = [i for i in range(seq_len) if i not in positive_indices]
+    """Sample random negative token indices."""
+    if n_negatives <= 0:
+        return []
+    candidates = [
+        i
+        for i in range(seq_len)
+        if i not in positive_indices
+        and (exclude_indices is None or i not in exclude_indices)
+    ]
     if not candidates:
         return []
     if n_negatives >= len(candidates):
         return [rng.choice(candidates) for _ in range(n_negatives)]
     return rng.sample(candidates, n_negatives)
+
+
+def _sample_token_matched_negatives(
+    input_ids: list[int],
+    positive_indices: set[int],
+    positive_token_ids: set[int],
+    rng: random.Random,
+    max_per_token: int = 2,
+) -> list[int]:
+    """Sample negative indices that match token IDs appearing in positives.
+
+    This forces the probe to learn from context rather than token identity,
+    because the same token ID appears in both positive and negative examples.
+
+    Args:
+        input_ids: List of token IDs for the sequence
+        positive_indices: Set of indices that are positive (needle span)
+        positive_token_ids: Set of token IDs that appear in positive indices
+        rng: Random number generator
+        max_per_token: Maximum negatives to sample per unique token ID
+
+    Returns:
+        List of negative indices whose token IDs match positive tokens
+    """
+    # Build index of where each token ID appears outside the positive span
+    token_id_to_neg_indices: dict[int, list[int]] = {}
+    for idx, token_id in enumerate(input_ids):
+        if idx not in positive_indices and token_id in positive_token_ids:
+            token_id_to_neg_indices.setdefault(token_id, []).append(idx)
+
+    matched_negatives = []
+    for token_id, neg_indices in token_id_to_neg_indices.items():
+        # Sample up to max_per_token negatives for this token ID
+        n_sample = min(max_per_token, len(neg_indices))
+        if n_sample > 0:
+            matched_negatives.extend(rng.sample(neg_indices, n_sample))
+
+    return matched_negatives
 
 
 def _build_feature_tensor_from_examples(
@@ -189,6 +236,8 @@ def _build_feature_tensor_from_examples(
     max_tokens: int | None,
     feature_dtype: torch.dtype,
     doc_batch_size: int,
+    token_matched_negatives: bool = False,
+    token_matched_max_per_token: int = 2,
     progress_desc: str | None = None,
     show_progress: bool = True,
     progress_callback: Callable[[int], None] | None = None,
@@ -242,9 +291,37 @@ def _build_feature_tensor_from_examples(
                 positives = {i for i in positives if i < seq_len}
 
             neg_rng = random.Random(seed + ex.seed)
-            negatives = _sample_negatives(
-                seq_len, positives, negatives_per_doc, neg_rng
-            )
+
+            # Get token IDs for this sequence (for token-matched sampling)
+            batch_input_ids = input_ids[batch_idx, :seq_len].tolist()
+
+            if token_matched_negatives and positives:
+                # Token-matched negative sampling: sample negatives that
+                # share token IDs with positives to prevent token identity leakage
+                positive_token_ids = {batch_input_ids[i] for i in positives}
+                matched_negs = _sample_token_matched_negatives(
+                    input_ids=batch_input_ids,
+                    positive_indices=positives,
+                    positive_token_ids=positive_token_ids,
+                    rng=neg_rng,
+                    max_per_token=token_matched_max_per_token,
+                )
+                if len(matched_negs) > negatives_per_doc:
+                    matched_negs = neg_rng.sample(matched_negs, negatives_per_doc)
+                # Also sample some random negatives for coverage
+                remaining = max(0, negatives_per_doc - len(matched_negs))
+                random_negs = _sample_negatives(
+                    seq_len,
+                    positives,
+                    remaining,
+                    neg_rng,
+                    exclude_indices=set(matched_negs),
+                )
+                negatives = matched_negs + random_negs
+            else:
+                negatives = _sample_negatives(
+                    seq_len, positives, negatives_per_doc, neg_rng
+                )
 
             selected_indices = list(sorted(positives)) + negatives
             if (
@@ -327,6 +404,8 @@ def _build_feature_tensor(
     length_buckets: list[int] | None,
     feature_dtype: torch.dtype,
     doc_batch_size: int,
+    token_matched_negatives: bool = False,
+    token_matched_max_per_token: int = 2,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
     split_examples = _filter_examples(examples, split, seed, max_docs, length_buckets)
     return _build_feature_tensor_from_examples(
@@ -338,6 +417,8 @@ def _build_feature_tensor(
         max_tokens=max_tokens,
         feature_dtype=feature_dtype,
         doc_batch_size=doc_batch_size,
+        token_matched_negatives=token_matched_negatives,
+        token_matched_max_per_token=token_matched_max_per_token,
         progress_desc=f"{split} extraction",
         show_progress=True,
     )
@@ -366,6 +447,8 @@ def _extract_worker(
     max_tokens: int | None,
     output_path: str,
     progress_queue: mp.Queue | None,
+    token_matched_negatives: bool = False,
+    token_matched_max_per_token: int = 2,
 ) -> None:
     disable_tokenizers_parallelism()
     torch.set_num_threads(1)
@@ -426,6 +509,8 @@ def _extract_worker(
         max_tokens=max_tokens,
         feature_dtype=feature_dtype,
         doc_batch_size=doc_batch_size,
+        token_matched_negatives=token_matched_negatives,
+        token_matched_max_per_token=token_matched_max_per_token,
         progress_desc=None,
         show_progress=False,
         progress_callback=_progress,
@@ -451,6 +536,8 @@ def _build_feature_tensor_parallel(
     num_workers: int,
     device_ids: list[int],
     progress_desc: str,
+    token_matched_negatives: bool = False,
+    token_matched_max_per_token: int = 2,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
     if not split_examples:
         raise RuntimeError(f"No examples found for split {split}")
@@ -495,6 +582,8 @@ def _build_feature_tensor_parallel(
                 per_worker_max,
                 str(shard_path),
                 progress_queue,
+                token_matched_negatives,
+                token_matched_max_per_token,
             ),
         )
         proc.start()
@@ -687,6 +776,12 @@ def main() -> int:
     if probe_config.class_balance not in {"weighted", "downsample"}:
         raise ValueError("probe.class_balance must be 'weighted' or 'downsample'")
 
+    # Backwards compatibility: provide defaults for new config fields
+    if not hasattr(probe_config, "token_matched_negatives"):
+        probe_config.token_matched_negatives = True
+    if not hasattr(probe_config, "token_matched_max_per_token"):
+        probe_config.token_matched_max_per_token = 2
+
     run_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     device_map = _parse_device_map(args.device_map)
     extract_workers = args.extract_workers
@@ -826,6 +921,8 @@ def main() -> int:
                         num_workers=extract_workers,
                         device_ids=device_ids or list(range(extract_workers)),
                         progress_desc=f"train extraction (L{layer_idx})",
+                        token_matched_negatives=probe_config.token_matched_negatives,
+                        token_matched_max_per_token=probe_config.token_matched_max_per_token,
                     )
                 )
 
@@ -843,6 +940,8 @@ def main() -> int:
                     num_workers=extract_workers,
                     device_ids=device_ids or list(range(extract_workers)),
                     progress_desc=f"val extraction (L{layer_idx})",
+                    token_matched_negatives=probe_config.token_matched_negatives,
+                    token_matched_max_per_token=probe_config.token_matched_max_per_token,
                 )
             else:
                 extractor = ActivationExtractor(
@@ -865,6 +964,8 @@ def main() -> int:
                     length_buckets=probe_config.train_length_buckets,
                     feature_dtype=feature_dtype,
                     doc_batch_size=args.doc_batch_size,
+                    token_matched_negatives=probe_config.token_matched_negatives,
+                    token_matched_max_per_token=probe_config.token_matched_max_per_token,
                 )
 
                 val_features, val_labels, val_stats = _build_feature_tensor(
@@ -879,6 +980,8 @@ def main() -> int:
                     length_buckets=probe_config.val_length_buckets,
                     feature_dtype=feature_dtype,
                     doc_batch_size=args.doc_batch_size,
+                    token_matched_negatives=probe_config.token_matched_negatives,
+                    token_matched_max_per_token=probe_config.token_matched_max_per_token,
                 )
 
             if probe_config.class_balance == "downsample":

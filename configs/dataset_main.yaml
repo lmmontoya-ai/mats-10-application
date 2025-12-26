@@ -115,14 +115,20 @@ filler:
 
 # Probe training configuration (Task 2)
 probe:
-  # Layers to probe (set based on model depth)
-  layers_to_probe: [16]
+  # Layers to probe - sweep every 4 layers for Gemma 3 4B (26 layers total)
+  # Coarse sweep: [4, 8, 12, 16, 20, 24] covers early to late layers
+  layers_to_probe: [4, 8, 12, 16, 20, 24]
 
   # Activation site for the probe (currently supports resid_post)
   activation_site: "resid_post"
 
   # Token sampling
   negatives_per_doc: 128
+  # Token-matched negative sampling: samples negatives with same token IDs
+  # as positives to prevent the probe from learning token identity shortcuts
+  token_matched_negatives: true
+  token_matched_max_per_token: 2
+
   # Restrict train/val to specific length buckets (null = all)
   train_length_buckets: null
   val_length_buckets: null
@@ -137,7 +143,8 @@ probe:
   learning_rate: 1e-3
   l2_grid: [0.0, 1e-4, 1e-3, 1e-2]
   class_balance: "weighted"
-  train_seeds: [0]
+  # Multiple seeds for robustness / confidence intervals
+  train_seeds: [0, 1, 2]
 
   # Runtime
   device: "auto"
@@ -163,7 +170,9 @@ eval:
   error_analysis: true
   error_samples: 20
   error_length_bucket: null
+  diagnostic_token_threshold: 0.9
   plot_length_bucket: null
-  plot_distractor_level: null
-  plot_layer_aggregator: null
-  plot_layer_metric: "fpr_at_tpr_0.95"
+  plot_distractor_level: 0 # Plot at distractor=0 to show clean baseline
+  plot_layer_aggregator: null # Auto-select best aggregator
+  # Use intrinsic FPR metric (via ROC interpolation, threshold-free)
+  plot_layer_metric: "fpr_intrinsic_at_tpr_0.95"

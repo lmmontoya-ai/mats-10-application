@@ -1,0 +1,109 @@
+# Sweep Configuration
+# ===================
+# Coarse layer sweep with a small dataset for quick iteration.
+#
+# Totals per split are approximately:
+# - Train: 50 * 12 = 600 docs
+# - Val: 8 * 12 = 96 docs
+# - Test: 8 * 12 = 96 docs
+
+tokenizer:
+  model_id: "google/gemma-3-4b-it"
+  tokenizer_id: null
+  tokenizer_revision: null
+  max_length_bucket: 16384
+  token_tolerance_ratio: 0.02
+
+scale:
+  n_train: 50
+  n_val: 8
+  n_test: 8
+  positive_fraction: 0.5
+
+grid:
+  length_buckets_tokens:
+    - 2048
+    - 8192
+    - 16384
+  distractor_levels:
+    - 0
+    - 1
+    - 4
+    - 8
+
+randomness:
+  dataset_seed: 42
+  template_seed: null
+  filler_seed: null
+
+templates:
+  templates_path: null
+  needle_families: []
+  distractor_families: []
+
+splits:
+  test_needle_families:
+    - "jailbreak_direct"
+    - "context_confusion"
+  val_needle_families:
+    - "authority_claim"
+  test_fraction: 0.2
+  val_fraction: 0.1
+  holdout_distractor_families: false
+
+output:
+  dataset_name: "needle_haystack"
+  dataset_version: "v1.0_sweep"
+  output_root: "data"
+
+filler:
+  filler_path: "data_raw/filler_segments.jsonl"
+  allow_llm_fallback: false
+  min_segment_tokens: 50
+  max_segment_tokens: 500
+
+probe:
+  layers_to_probe: [4, 8, 12, 16, 20, 24]
+  activation_site: "resid_post"
+  negatives_per_doc: 128
+  token_matched_negatives: true
+  token_matched_max_per_token: 2
+  train_length_buckets: null
+  val_length_buckets: null
+  max_train_docs: 600
+  max_val_docs: 100
+  max_train_tokens: null
+  max_val_tokens: null
+  batch_size: 256
+  num_epochs: 3
+  learning_rate: 1e-3
+  l2_grid: [0.0, 1e-4, 1e-3, 1e-2]
+  class_balance: "weighted"
+  train_seeds: [0]
+  device: "auto"
+  model_dtype: "bfloat16"
+  feature_dtype: "float32"
+  save_features: false
+  output_dir: "results/probes"
+
+eval:
+  aggregators: ["max", "noisy_or", "logsumexp", "ema_max", "windowed_max_mean"]
+  logsumexp_temperature: 1.0
+  logsumexp_length_correction: true
+  topk_k: null
+  ema_alpha: 0.1
+  window_size: 128
+  target_tprs: [0.95]
+  eval_doc_batch_size: 1
+  max_eval_docs: 100
+  calibrator: "platt"
+  results_dir: "results"
+  save_scores: false
+  error_analysis: true
+  error_samples: 20
+  error_length_bucket: null
+  diagnostic_token_threshold: 0.9
+  plot_length_bucket: null
+  plot_distractor_level: 0
+  plot_layer_aggregator: null
+  plot_layer_metric: "fpr_intrinsic_at_tpr_0.95"
