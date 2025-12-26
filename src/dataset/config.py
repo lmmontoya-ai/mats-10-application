@@ -113,6 +113,9 @@ class ProbeConfig:
     layers_to_probe: list[int] = field(default_factory=lambda: [16])
     activation_site: str = "resid_post"
     negatives_per_doc: int = 128
+    # Token-matched negative sampling to prevent token-identity leakage
+    token_matched_negatives: bool = True  # Recommended: True to fix leakage
+    token_matched_max_per_token: int = 2  # Max matched negatives per positive token ID
     train_length_buckets: list[int] | None = None
     val_length_buckets: list[int] | None = None
     max_train_docs: int | None = None
@@ -124,7 +127,7 @@ class ProbeConfig:
     learning_rate: float = 1e-3
     l2_grid: list[float] = field(default_factory=lambda: [0.0, 1e-4, 1e-3, 1e-2])
     class_balance: str = "weighted"  # weighted | downsample
-    train_seeds: list[int] = field(default_factory=lambda: [0])
+    train_seeds: list[int] = field(default_factory=lambda: [0, 1, 2])  # Multiple seeds
     device: str = "auto"  # auto | cpu | cuda | mps
     model_dtype: str = "auto"  # auto | float32 | float16 | bfloat16
     feature_dtype: str = "float32"  # float32 | float16
@@ -150,12 +153,28 @@ class ProbeConfig:
                 return float(value)
             return float(str(value))
 
+        def _coerce_bool(value: Any, name: str) -> bool:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.lower() in ("true", "yes", "1")
+            return bool(value)
+
         if self.layers_to_probe is not None:
             self.layers_to_probe = [
                 _coerce_int(v, "probe.layers_to_probe") for v in self.layers_to_probe
             ]
         self.negatives_per_doc = _coerce_int(
             self.negatives_per_doc, "probe.negatives_per_doc"
+        )
+        self.token_matched_negatives = _coerce_bool(
+            self.token_matched_negatives, "probe.token_matched_negatives"
+        )
+        self.token_matched_max_per_token = (
+            _coerce_int(
+                self.token_matched_max_per_token, "probe.token_matched_max_per_token"
+            )
+            or 2
         )
         self.batch_size = _coerce_int(self.batch_size, "probe.batch_size")
         self.num_epochs = _coerce_int(self.num_epochs, "probe.num_epochs")
@@ -201,6 +220,7 @@ class EvalConfig:
     error_analysis: bool = True
     error_samples: int = 20
     error_length_bucket: int | None = None
+    diagnostic_token_threshold: float | None = 0.9
     plot_length_bucket: int | None = None
     plot_distractor_level: int | None = None
     plot_layer_aggregator: str | None = None
@@ -245,6 +265,10 @@ class EvalConfig:
         self.error_length_bucket = _coerce_int(
             self.error_length_bucket, "eval.error_length_bucket"
         )
+        if self.diagnostic_token_threshold is not None:
+            self.diagnostic_token_threshold = _coerce_float(
+                self.diagnostic_token_threshold, "eval.diagnostic_token_threshold"
+            )
         self.plot_length_bucket = _coerce_int(
             self.plot_length_bucket, "eval.plot_length_bucket"
         )
@@ -349,6 +373,10 @@ class DatasetConfig:
             errors.append("eval.window_size must be positive")
         if self.eval.logsumexp_temperature <= 0:
             errors.append("eval.logsumexp_temperature must be positive")
+        if self.eval.diagnostic_token_threshold is not None and not (
+            0 < self.eval.diagnostic_token_threshold < 1
+        ):
+            errors.append("eval.diagnostic_token_threshold must be in (0, 1)")
 
         return errors
 
