@@ -1,0 +1,164 @@
+{
+  "stage": "dataset_generation",
+  "dataset_name": "needle_haystack",
+  "dataset_version": "v1.0_sweep",
+  "timestamps": {
+    "start": "2025-12-26T22:14:04Z",
+    "end": "2025-12-26T22:15:07Z"
+  },
+  "model_id": "google/gemma-3-4b-it",
+  "tokenizer": {
+    "model_id": "google/gemma-3-4b-it",
+    "tokenizer_id": "google/gemma-3-4b-it",
+    "tokenizer_revision": null,
+    "tokenizer_class": "GemmaTokenizerFast",
+    "is_fast": true,
+    "supports_offsets": true
+  },
+  "seeds": {
+    "dataset_seed": 42,
+    "template_seed": 1042,
+    "filler_seed": 2042
+  },
+  "grid": {
+    "length_buckets_tokens": [
+      2048,
+      8192,
+      16384
+    ],
+    "distractor_levels": [
+      0,
+      1,
+      4,
+      8
+    ]
+  },
+  "scale": {
+    "n_train": 50,
+    "n_val": 8,
+    "n_test": 8,
+    "positive_fraction": 0.5
+  },
+  "splits": {
+    "test_needle_families": [
+      "jailbreak_direct",
+      "context_confusion"
+    ],
+    "val_needle_families": [
+      "authority_claim"
+    ],
+    "test_fraction": 0.2,
+    "val_fraction": 0.1,
+    "holdout_distractor_families": false
+  },
+  "template_families": {
+    "needle": [
+      "ignore_previous",
+      "system_override",
+      "role_hijack",
+      "developer_mode",
+      "hidden_instruction",
+      "jailbreak_direct",
+      "context_confusion",
+      "authority_claim"
+    ],
+    "distractor": [
+      "academic_discussion",
+      "quoted_policy",
+      "fictional_dialogue",
+      "instructional_defense",
+      "historical_context",
+      "technical_documentation",
+      "news_article",
+      "casual_conversation"
+    ]
+  },
+  "split_assignment": {
+    "needle_families": {
+      "train": [
+        "ignore_previous",
+        "system_override",
+        "role_hijack",
+        "developer_mode",
+        "hidden_instruction"
+      ],
+      "val": [
+        "authority_claim"
+      ],
+      "test": [
+        "jailbreak_direct",
+        "context_confusion"
+      ]
+    },
+    "distractor_families": {
+      "train": [
+        "academic_discussion",
+        "quoted_policy",
+        "fictional_dialogue",
+        "instructional_defense",
+        "historical_context",
+        "technical_documentation",
+        "news_article",
+        "casual_conversation"
+      ],
+      "val": [
+        "academic_discussion",
+        "quoted_policy",
+        "fictional_dialogue",
+        "instructional_defense",
+        "historical_context",
+        "technical_documentation",
+        "news_article",
+        "casual_conversation"
+      ],
+      "test": [
+        "academic_discussion",
+        "quoted_policy",
+        "fictional_dialogue",
+        "instructional_defense",
+        "historical_context",
+        "technical_documentation",
+        "news_article",
+        "casual_conversation"
+      ]
+    },
+    "counts": {
+      "train_needle": 5,
+      "val_needle": 1,
+      "test_needle": 2,
+      "train_distractor": 8,
+      "val_distractor": 8,
+      "test_distractor": 8
+    }
+  },
+  "filler": {
+    "filler_path": "data_raw/filler_segments.jsonl",
+    "used_fallback": false,
+    "fallback_type": null,
+    "fallback_prompt": null
+  },
+  "outputs": {
+    "dataset": "data/datasets/needle_haystack_v1.0_sweep.jsonl",
+    "manifest": "data/splits/needle_haystack_v1.0_sweep_manifest.csv",
+    "qa_json": "data/qa/needle_haystack_v1.0_sweep_qa.json",
+    "qa_txt": "data/qa/needle_haystack_v1.0_sweep_qa.txt",
+    "spot_check": "data/qa/needle_haystack_v1.0_sweep_spot_check.txt",
+    "train_split": "data/datasets/needle_haystack_v1.0_sweep_train.jsonl",
+    "val_split": "data/datasets/needle_haystack_v1.0_sweep_val.jsonl",
+    "test_split": "data/datasets/needle_haystack_v1.0_sweep_test.jsonl"
+  },
+  "qa": {
+    "all_checks_passed": true,
+    "errors": [],
+    "warnings": [],
+    "baseline_warning": null
+  },
+  "qa_summary_paths": {
+    "qa_json_path": "data/qa/needle_haystack_v1.0_sweep_qa.json",
+    "qa_txt_path": "data/qa/needle_haystack_v1.0_sweep_qa.txt"
+  },
+  "hyperparameters_searched": {},
+  "selected_hyperparameters": {},
+  "config_path": "configs/dataset_sweep.yaml",
+  "git_commit": "3006c6ae914a5d046040af90bf8454bf421d7d6d"
+}
