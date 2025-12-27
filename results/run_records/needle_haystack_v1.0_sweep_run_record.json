@@ -3,8 +3,8 @@
   "dataset_name": "needle_haystack",
   "dataset_version": "v1.0_sweep",
   "timestamps": {
-    "start": "2025-12-26T22:14:04Z",
-    "end": "2025-12-26T22:15:07Z"
+    "start": "2025-12-26T22:46:26Z",
+    "end": "2025-12-26T22:48:56Z"
   },
   "model_id": "google/gemma-3-4b-it",
   "tokenizer": {
@@ -160,5 +160,5 @@
   "hyperparameters_searched": {},
   "selected_hyperparameters": {},
   "config_path": "configs/dataset_sweep.yaml",
-  "git_commit": "3006c6ae914a5d046040af90bf8454bf421d7d6d"
+  "git_commit": "ecb58090bbf4fdc3171ad2b6f2cabf4fb62aa914"
 }
