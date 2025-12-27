@@ -187,3 +187,14 @@ From `results/metrics/needle_haystack_v1.0_eval_metrics.csv`:
 - Check `results/analysis/*_triggers_*.txt` for token-identity leakage
 - Verify `token_matched_negatives: true` in config
 - Ensure template families are held out in test split
+
+## Rigorous Sweep (Recommended)
+
+For a more reliable sweep (enough data per condition to stabilize FPR curves),
+use the rigorous sweep config:
+
+```bash
+python scripts/run_sweep.py --config configs/dataset_sweep_rigorous.yaml --doc-batch-size 1
+```
+
+This generates results under `dataset_version: v1.0_sweep_rigorous`.
