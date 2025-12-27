@@ -1,0 +1,145 @@
+{
+  "stage": "probe_training",
+  "run_id": "needle_haystack_v1.0_sweep",
+  "dataset_name": "needle_haystack",
+  "dataset_version": "v1.0_sweep",
+  "timestamps": {
+    "start": "2025-12-26T22:49:02Z",
+    "end": "2025-12-26T23:35:30Z"
+  },
+  "model_id": "google/gemma-3-4b-it",
+  "tokenizer": {
+    "model_id": "google/gemma-3-4b-it",
+    "tokenizer_id": "google/gemma-3-4b-it",
+    "tokenizer_revision": null,
+    "tokenizer_class": "GemmaTokenizerFast",
+    "is_fast": true,
+    "supports_offsets": true
+  },
+  "probe_config": {
+    "layers_to_probe": [
+      4,
+      8,
+      12,
+      16,
+      20,
+      24
+    ],
+    "activation_site": "resid_post",
+    "negatives_per_doc": 128,
+    "token_matched_negatives": true,
+    "token_matched_max_per_token": 2,
+    "train_length_buckets": null,
+    "val_length_buckets": null,
+    "max_train_docs": 600,
+    "max_val_docs": 100,
+    "max_train_tokens": null,
+    "max_val_tokens": null,
+    "batch_size": 256,
+    "num_epochs": 3,
+    "learning_rate": 0.001,
+    "l2_grid": [
+      0.0,
+      0.0001,
+      0.001,
+      0.01
+    ],
+    "class_balance": "weighted",
+    "train_seeds": [
+      0
+    ],
+    "device": "auto",
+    "model_dtype": "bfloat16",
+    "feature_dtype": "float32",
+    "save_features": false,
+    "output_dir": "results/probes"
+  },
+  "hyperparameters_searched": {
+    "l2_grid": [
+      0.0,
+      0.0001,
+      0.001,
+      0.01
+    ]
+  },
+  "selected_hyperparameters": {
+    "4": {
+      "0": {
+        "seed": 0,
+        "selected_l2": 0.0,
+        "accuracy": 0.9770635044468716,
+        "precision": 0.972,
+        "recall": 0.45849056603773586,
+        "f1": 0.6230769230769231,
+        "auroc": 0.9878243207931519
+      }
+    },
+    "8": {
+      "0": {
+        "seed": 0,
+        "selected_l2": 0.001,
+        "accuracy": 0.9829926665626463,
+        "precision": 0.9431818181818182,
+        "recall": 0.6264150943396226,
+        "f1": 0.7528344671201814,
+        "auroc": 0.9953016042709351
+      }
+    },
+    "12": {
+      "0": {
+        "seed": 0,
+        "selected_l2": 0.0,
+        "accuracy": 0.9896239662973942,
+        "precision": 0.8724202626641651,
+        "recall": 0.8773584905660378,
+        "f1": 0.8748824082784572,
+        "auroc": 0.9971063733100891
+      }
+    },
+    "16": {
+      "0": {
+        "seed": 0,
+        "selected_l2": 0.0,
+        "accuracy": 0.9903261039163677,
+        "precision": 0.8996062992125984,
+        "recall": 0.8622641509433963,
+        "f1": 0.8805394990366088,
+        "auroc": 0.9981220960617065
+      }
+    },
+    "20": {
+      "0": {
+        "seed": 0,
+        "selected_l2": 0.0001,
+        "accuracy": 0.9872054922764862,
+        "precision": 0.937799043062201,
+        "recall": 0.7396226415094339,
+        "f1": 0.8270042194092827,
+        "auroc": 0.9947614073753357
+      }
+    },
+    "24": {
+      "0": {
+        "seed": 0,
+        "selected_l2": 0.0001,
+        "accuracy": 0.9786238102668123,
+        "precision": 0.9475524475524476,
+        "recall": 0.5113207547169811,
+        "f1": 0.6642156862745098,
+        "auroc": 0.9965235590934753
+      }
+    }
+  },
+  "metrics_path": "results/probes/needle_haystack_v1.0_sweep/probe_metrics.csv",
+  "outputs_dir": "results/probes/needle_haystack_v1.0_sweep",
+  "git_commit": "ecb58090bbf4fdc3171ad2b6f2cabf4fb62aa914",
+  "runtime": {
+    "device": "cuda",
+    "device_map": null,
+    "input_device": "cuda:0",
+    "doc_batch_size": 1,
+    "extract_workers": 1,
+    "workers_per_gpu": 1,
+    "extract_device_ids": null
+  }
+}

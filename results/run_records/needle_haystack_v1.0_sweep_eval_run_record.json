@@ -1,0 +1,50 @@
+{
+  "stage": "evaluation",
+  "run_id": "needle_haystack_v1.0_sweep",
+  "dataset_name": "needle_haystack",
+  "dataset_version": "v1.0_sweep",
+  "timestamps": {
+    "start": "2025-12-26T23:35:35Z",
+    "end": "2025-12-26T23:53:42Z"
+  },
+  "model_id": "google/gemma-3-4b-it",
+  "tokenizer_id": "google/gemma-3-4b-it",
+  "eval_config": {
+    "aggregators": [
+      "max",
+      "noisy_or",
+      "logsumexp",
+      "ema_max",
+      "windowed_max_mean"
+    ],
+    "logsumexp_temperature": 1.0,
+    "logsumexp_length_correction": true,
+    "topk_k": null,
+    "ema_alpha": 0.1,
+    "window_size": 128,
+    "target_tprs": [
+      0.95
+    ],
+    "eval_doc_batch_size": 1,
+    "max_eval_docs": 100,
+    "calibrator": "platt",
+    "results_dir": "results",
+    "save_scores": false,
+    "error_analysis": true,
+    "error_samples": 20,
+    "error_length_bucket": null,
+    "diagnostic_token_threshold": 0.9,
+    "plot_length_bucket": null,
+    "plot_distractor_level": 0,
+    "plot_layer_aggregator": null,
+    "plot_layer_metric": "fpr_intrinsic_at_tpr_0.95"
+  },
+  "metrics_path": "results/metrics/needle_haystack_v1.0_sweep_eval_metrics.csv",
+  "git_commit": "ecb58090bbf4fdc3171ad2b6f2cabf4fb62aa914",
+  "runtime": {
+    "device": "cuda",
+    "device_map": null,
+    "doc_batch_size": 1,
+    "max_eval_docs": 100
+  }
+}
